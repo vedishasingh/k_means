@@ -21,46 +21,102 @@ uploaded_file = st.file_uploader("Upload income.csv", type=["csv"])
 
 if uploaded_file is not None:
 
+    # Read dataset
     df = pd.read_csv(uploaded_file)
+
+    # Remove extra spaces from column names
+    df.columns = df.columns.str.strip()
+
+    # Check required columns
+    required_cols = ["Age", "Income($)"]
+
+    if not all(col in df.columns for col in required_cols):
+        st.error(
+            f"Dataset must contain the columns: {required_cols}\n\n"
+            f"Found columns: {list(df.columns)}"
+        )
+        st.stop()
+
+    # Keep only required columns if desired
+    df = df.copy()
+
+    # Convert to numeric
+    df["Age"] = pd.to_numeric(df["Age"], errors="coerce")
+    df["Income($)"] = pd.to_numeric(df["Income($)"], errors="coerce")
+
+    # Remove missing values
+    df.dropna(subset=["Age", "Income($)"], inplace=True)
+
+    if len(df) < 2:
+        st.error("Dataset must contain at least two valid rows.")
+        st.stop()
 
     st.subheader("Dataset")
     st.dataframe(df)
 
+    # Original Scatter Plot
     st.subheader("Original Data")
 
     fig, ax = plt.subplots(figsize=(6,4))
-    ax.scatter(df["Age"], df["Income($)"])
+    ax.scatter(df["Age"], df["Income($)"], color="blue")
     ax.set_xlabel("Age")
     ax.set_ylabel("Income($)")
     st.pyplot(fig)
 
-    # Number of clusters
-    k = st.slider("Select Number of Clusters", 2, 10, 3)
+    # Slider
+    max_k = min(10, len(df))
+    default_k = min(3, max_k)
 
-    # KMeans before scaling
-    km = KMeans(n_clusters=k, random_state=42)
+    k = st.slider(
+        "Select Number of Clusters",
+        min_value=2,
+        max_value=max_k,
+        value=default_k
+    )
+
+    # ------------------------
+    # KMeans Before Scaling
+    # ------------------------
+    km = KMeans(
+        n_clusters=k,
+        random_state=42,
+        n_init=10
+    )
+
     df["cluster"] = km.fit_predict(df[["Age", "Income($)"]])
 
     st.subheader("Cluster Centers (Before Scaling)")
-    st.write(km.cluster_centers_)
+    st.write(pd.DataFrame(
+        km.cluster_centers_,
+        columns=["Age", "Income($)"]
+    ))
+
+    colors = [
+        "red","green","blue","orange","purple",
+        "cyan","magenta","brown","pink","black"
+    ]
 
     fig, ax = plt.subplots(figsize=(6,4))
 
-    colors = ['red', 'green', 'blue', 'orange', 'purple',
-              'black', 'cyan', 'magenta', 'brown', 'pink']
-
     for i in range(k):
         cluster = df[df.cluster == i]
-        ax.scatter(cluster["Age"], cluster["Income($)"],
-                   color=colors[i % len(colors)],
-                   label=f"Cluster {i}")
+        ax.scatter(
+            cluster["Age"],
+            cluster["Income($)"],
+            color=colors[i % len(colors)],
+            label=f"Cluster {i}",
+            s=70
+        )
 
-    ax.scatter(km.cluster_centers_[:,0],
-               km.cluster_centers_[:,1],
-               color='yellow',
-               marker='*',
-               s=250,
-               label='Centroid')
+    ax.scatter(
+        km.cluster_centers_[:,0],
+        km.cluster_centers_[:,1],
+        marker="*",
+        s=250,
+        color="yellow",
+        edgecolors="black",
+        label="Centroids"
+    )
 
     ax.set_xlabel("Age")
     ax.set_ylabel("Income($)")
@@ -68,43 +124,63 @@ if uploaded_file is not None:
 
     st.pyplot(fig)
 
+    st.subheader("Clustered Dataset")
+    st.dataframe(df)
+
+    # ------------------------
     # Scaling
+    # ------------------------
     scaler = MinMaxScaler()
 
     scaled_df = df.copy()
 
-    scaled_df["Age"] = scaler.fit_transform(scaled_df[["Age"]])
-    scaled_df["Income($)"] = scaler.fit_transform(
-        scaled_df[["Income($)"]]
+    scaled_df[["Age", "Income($)"]] = scaler.fit_transform(
+        scaled_df[["Age", "Income($)"]]
     )
 
     st.subheader("Scaled Dataset")
     st.dataframe(scaled_df)
 
-    # KMeans after scaling
-    km = KMeans(n_clusters=k, random_state=42)
-    scaled_df["cluster"] = km.fit_predict(
+    # ------------------------
+    # KMeans After Scaling
+    # ------------------------
+    km_scaled = KMeans(
+        n_clusters=k,
+        random_state=42,
+        n_init=10
+    )
+
+    scaled_df["cluster"] = km_scaled.fit_predict(
         scaled_df[["Age", "Income($)"]]
     )
 
     st.subheader("Cluster Centers (After Scaling)")
-    st.write(km.cluster_centers_)
+    st.write(pd.DataFrame(
+        km_scaled.cluster_centers_,
+        columns=["Scaled Age", "Scaled Income"]
+    ))
 
     fig, ax = plt.subplots(figsize=(6,4))
 
     for i in range(k):
         cluster = scaled_df[scaled_df.cluster == i]
-        ax.scatter(cluster["Age"],
-                   cluster["Income($)"],
-                   color=colors[i % len(colors)],
-                   label=f"Cluster {i}")
+        ax.scatter(
+            cluster["Age"],
+            cluster["Income($)"],
+            color=colors[i % len(colors)],
+            label=f"Cluster {i}",
+            s=70
+        )
 
-    ax.scatter(km.cluster_centers_[:,0],
-               km.cluster_centers_[:,1],
-               color='yellow',
-               marker='*',
-               s=250,
-               label='Centroid')
+    ax.scatter(
+        km_scaled.cluster_centers_[:,0],
+        km_scaled.cluster_centers_[:,1],
+        marker="*",
+        s=250,
+        color="yellow",
+        edgecolors="black",
+        label="Centroids"
+    )
 
     ax.set_xlabel("Scaled Age")
     ax.set_ylabel("Scaled Income")
@@ -112,23 +188,29 @@ if uploaded_file is not None:
 
     st.pyplot(fig)
 
+    # ------------------------
     # Elbow Method
+    # ------------------------
     st.subheader("Elbow Method")
 
     sse = []
 
-    K = range(1, 11)
-
-    for i in K:
-        model = KMeans(n_clusters=i, random_state=42)
+    for i in range(1, max_k + 1):
+        model = KMeans(
+            n_clusters=i,
+            random_state=42,
+            n_init=10
+        )
         model.fit(scaled_df[["Age", "Income($)"]])
         sse.append(model.inertia_)
 
     fig, ax = plt.subplots(figsize=(6,4))
-    ax.plot(K, sse, marker='o')
-    ax.set_xlabel("Number of Clusters (K)")
-    ax.set_ylabel("Sum of Squared Error")
+    ax.plot(range(1, max_k + 1), sse, marker="o")
+    ax.axvline(k, color="red", linestyle="--", label=f"K={k}")
+    ax.set_xlabel("Number of Clusters")
+    ax.set_ylabel("SSE")
     ax.set_title("Elbow Method")
+    ax.legend()
 
     st.pyplot(fig)
 
